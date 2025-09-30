@@ -1,0 +1,98 @@
+import json
+from vpc.flowlog_cost import get_flowlog_cost
+from tag.ebs_tag import get_ebstagging
+
+def lambda_handler(event, context):
+  get_ebstagging()
+  return ''
+
+
+
+
+
+import boto3
+import json
+
+# Collect (Data Ingestion): $0.70 per GB
+# Store (Archival): $0.03 per GB
+# Analyze (Logs Insights queries): $0.007 per GB of data scanned
+pricing = {
+  'collect': 0.7,
+  'store': 0.03,
+  'analyze': 0.007
+}
+
+groups = [
+  'vpc-flowlog-yomaserverfarm',
+  'vpc-flowlog-vpc',
+  'vpc-flowlog-default'
+]
+
+cwlog = boto3.client('logs')
+
+def get_group_detail(groups=[]):
+  res = []
+  for group in groups:
+    size = get_group_size(group)
+    pricing = get_group_pricing(size)
+    res += [[group, size] + pricing]
+  return res
+
+def get_group_size(group):
+  res = cwlog.describe_log_groups(logGroupNamePrefix=group)
+  res_json = json.loads(json.dumps(res)).get('logGroups', '')[0]
+  return res_json.get('storedBytes', '')
+
+def get_group_pricing(size):
+  c_size = size/(1024**3)
+  return [
+    c_size * pricing.get('collect', ''),
+    c_size * pricing.get('store', ''),
+    c_size * pricing.get('analyze', '')
+    ]
+
+def get_flowlog_cost():
+    return get_group_detail(groups)
+
+
+
+
+import boto3
+import json
+
+ec2 = boto3.client("ec2")
+
+def tag_ebs(ebs=[]):
+  return ec2.create_tags(
+    Resources=ebs,
+    Tags=[
+    {
+      'Key': 'AWSBACKUP7',
+      'Value': 'YES'
+    },
+    {
+      'Key': 'AWSBACKUP30',
+      'Value': 'YES'
+    }])
+
+def get_instanceebs(blocks=[]):
+  devices = [device for device in blocks]
+  return [d.get('Ebs', '').get('VolumeId', '') for d in devices]
+
+def get_ebstagging():
+  res = ec2.describe_instances(
+    Filters=[
+      {
+        'Name': 'instance-state-name',
+        'Values': ['running']
+      }
+    ])
+  instances = sum(
+    [[i for i in r.get('Instances', '')] for r in res.get('Reservations', '')], [])
+  #print(len(instances))
+  ebs_ids = []
+  for i in instances:
+    ebs_ids += get_instanceebs(i.get('BlockDeviceMappings', ''))
+  #print(len(ebs_ids))
+  tag_ebs(ebs_ids)
+  return ''

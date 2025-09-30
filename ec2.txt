@@ -1,0 +1,52 @@
+import os
+import boto3
+
+ec2 = boto3.client('ec2')
+
+def get_instances_by_tag(ScheduleGroup):
+    instance_id_array = []
+    filters = [{
+        'Name': 'tag:ScheduleGroup',
+        'Values': [ScheduleGroup]
+    }]
+    response = ec2.describe_instances(Filters=filters)
+    for item in response["Reservations"]:
+        for instance in item['Instances']:
+            instance_id_array.append(instance['InstanceId'])
+    return instance_id_array
+
+
+def start(ids: list) -> list:
+    res = []
+    try:
+        res = ec2.start_instances(InstanceIds=ids)
+    except Exception as e:
+        return [str(e)]
+    return res.get('StartingInstances', '')
+
+def stop(ids: list) -> list:
+    res = []
+    try:
+        res = ec2.stop_instances(InstanceIds=ids)
+    except Exception as e:
+        return [str(e)]
+    return res.get('StoppingInstances', '')
+
+def lambda_handler(event, context):
+    action = event.get('action', '')
+    ScheduleGroup = event.get('ScheduleGroup', '')
+    instances = get_instances_by_tag(ScheduleGroup)
+    if (len(instances) < 1):
+        res = 'There is no Instances'
+        print(res)
+        return [res]
+
+    if action == 'stop':
+        res = stop(instances)
+    elif action == 'start':
+        res = start(instances)
+    else:
+        pass
+
+    print(res)
+    return res
